@@ -1,0 +1,155 @@
+---
+title: "conversion_atlas"
+format: html
+editor: visual
+---
+
+## Conversion of Marco Prinz atlas from RDS to h5ad
+
+```{r}
+library(Seurat)
+library(SingleCellExperiment)
+library(zellkonverter)
+
+obj <- readRDS("../data/Mouse_Myeloid_atlas_v1.RDS")
+#sce <- as.SingleCellExperiment(obj)
+#writeH5AD(sce, "../data/Mouse_Myeloid_atlas_v1.h5ad")
+```
+
+```{r}
+# metdata
+colnames(obj@meta.data)
+```
+
+```{r}
+meta <- obj@meta.data
+
+is_cat <- sapply(meta, function(x) is.factor(x) || is.character(x) || is.logical(x))
+
+# Categorical: tables
+lapply(meta[, is_cat, drop = FALSE], function(x) table(x, useNA = "ifany"))
+
+# Numeric: summary stats
+lapply(meta[, !is_cat, drop = FALSE], summary)
+```
+
+## Reducing the size of the seurat object before conversion
+
+otherwise it won't run.
+
+```{r}
+obj <- DietSeurat(
+  obj,
+  assays     = "RNA",
+  layers     = c("counts", "data"),   # use counts=TRUE, data=TRUE, scale.data=FALSE in Seurat v4
+  dimreducs  = c("pca", "umap"),      # keep only what you need
+  graphs     = NULL
+)
+gc()
+```
+
+```{r}
+cols_to_drop <- c("percent.mt", "Subclass_color", "Tissue_color", "Condition_color",
+                  "Module_id", "Context_region", "nCount_RNA",
+                  "Context_stagewise_Controls_merged", "Subclass_id_label",
+                  "Tissue_label", "Condition_label", "Condition_id",
+                  "Module_color", "relabelled_clusters")
+
+obj@meta.data <- obj@meta.data[, setdiff(colnames(obj@meta.data), cols_to_drop), drop = FALSE]
+```
+
+## Conversion
+
+```{r}
+sce <- as.SingleCellExperiment(obj)
+writeH5AD(sce, "/home/anitag/ST_Brambilla_local/data/Mouse_Myeloid_atlas_v1.h5ad")
+```
+
+NOT WORKING, still too much RAM used
+
+# Piece by piece conversion
+
+```{r}
+library(Seurat)
+library(Matrix)
+
+obj <- readRDS("../data/Mouse_Myeloid_atlas_v1.RDS")
+DefaultAssay(obj) <- "RNA"
+
+out <- "/home/anitag/ST_Brambilla_local/data/h5ad_parts"
+dir.create(out, showWarnings = FALSE)
+
+# check the reduction names match what you expect
+Reductions(obj)   # should include "pca" and "umap"
+
+# --- small things first ---
+write.csv(obj@meta.data,           file.path(out, "metadata.csv"))
+write.csv(Embeddings(obj, "pca"),  file.path(out, "pca.csv"))
+write.csv(Embeddings(obj, "umap"), file.path(out, "umap.csv"))
+writeLines(rownames(obj[["RNA"]]), file.path(out, "genes.txt"))
+writeLines(colnames(obj),          file.path(out, "barcodes.txt"))
+
+# --- matrices (Seurat v4: use GetAssayData(obj, slot = "counts") instead) ---
+counts <- LayerData(obj, assay = "RNA", layer = "counts")
+data   <- LayerData(obj, assay = "RNA", layer = "data")
+rm(obj); gc()   # the object itself is no longer needed
+
+dump_layer <- function(mat, name, chunk = 50000) {
+  n <- ncol(mat)
+  starts <- seq(1, n, by = chunk)
+  for (k in seq_along(starts)) {
+    idx <- starts[k]:min(starts[k] + chunk - 1, n)
+    m <- as(mat[, idx, drop = FALSE], "CsparseMatrix")
+    base <- file.path(out, sprintf("%s_%03d", name, k))
+    writeBin(m@i, paste0(base, "_i.bin"))                       # int32
+    writeBin(m@p, paste0(base, "_p.bin"))                       # int32
+    writeBin(as.numeric(m@x), paste0(base, "_x.bin"), size = 4) # float32
+    rm(m); gc()
+    message(name, ": chunk ", k, "/", length(starts))
+  }
+}
+
+dump_layer(counts, "counts"); rm(counts); gc()
+dump_layer(data,   "data");   rm(data);   gc()
+```
+
+Switching to python (just run this script somewhere else)
+
+```{python}
+import glob
+import numpy as np
+import pandas as pd
+import scipy.sparse as sp
+import anndata as ad
+
+d = "/home/anitag/ST_Brambilla_local/data/h5ad_parts/"
+genes    = open(d + "genes.txt").read().splitlines()
+barcodes = open(d + "barcodes.txt").read().splitlines()
+n_genes = len(genes)
+
+def load_layer(name):
+    mats = []
+    for pfile in sorted(glob.glob(f"{d}{name}_*_p.bin")):
+        base = pfile[:-6]
+        p = np.fromfile(base + "_p.bin", dtype=np.int32)
+        i = np.fromfile(base + "_i.bin", dtype=np.int32)
+        x = np.fromfile(base + "_x.bin", dtype=np.float32)
+        m = sp.csc_matrix((x, i, p), shape=(n_genes, len(p) - 1))
+        mats.append(m.T.tocsr())          # genes x cells -> cells x genes
+    return sp.vstack(mats, format="csr")
+
+counts = load_layer("counts")
+data   = load_layer("data")
+assert counts.shape == data.shape == (len(barcodes), n_genes)
+
+obs = pd.read_csv(d + "metadata.csv", index_col=0)
+assert list(obs.index) == barcodes        # same cell order as the matrices
+
+adata = ad.AnnData(X=data, obs=obs, var=pd.DataFrame(index=genes))
+adata.layers["counts"] = counts
+adata.obsm["X_pca"]  = pd.read_csv(d + "pca.csv",  index_col=0).loc[adata.obs_names].values
+adata.obsm["X_umap"] = pd.read_csv(d + "umap.csv", index_col=0).loc[adata.obs_names].values
+
+adata.write_h5ad("/home/anitag/ST_Brambilla_local/data/Mouse_Myeloid_atlas_v1.h5ad", compression="gzip")
+print(adata)
+```

@@ -1,0 +1,3 @@
+setting,balanced accuracy,macro AUC,chance
+atlas depth,0.6768663379440478,0.9283424985892827,0.125
+Xenium depth (thinned),0.537871066263917,0.8820820404159219,0.125

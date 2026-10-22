@@ -1,0 +1,16 @@
+scope,design,n_mice,pseudo_F,p_perm,n_perm
+all microglia,mtDSB vs control,12,1.2143469879428124,0.29,400
+all microglia,responder vs control,9,1.1442316281043374,0.32142857142857145,84
+all microglia,control / non-responder / responder,12,0.7448665028989181,0.5366666666666666,3600
+3,mtDSB vs control,12,2.3880213261698695,0.115,400
+3,responder vs control,9,8.732909294865173,0.011904761904761904,84
+3,control / non-responder / responder,12,6.362815098266019,0.008055555555555555,3600
+10,mtDSB vs control,12,1.3706866557462212,0.27,400
+10,responder vs control,9,0.5643820461365845,0.7619047619047619,84
+10,control / non-responder / responder,12,0.7269659031139268,0.7505555555555555,3600
+near - far (within compartment),mtDSB vs control,10,1.7411960020826376,0.13,100
+near - far (within compartment),responder vs control,8,1.3807716072511946,0.2857142857142857,56
+near - far (within compartment),control / non-responder / responder,10,0.9606671758764321,0.4483333333333333,600
+near - far (raw),mtDSB vs control,12,4.266499985399379,0.04,400
+near - far (raw),responder vs control,9,13.637802523420298,0.011904761904761904,84
+near - far (raw),control / non-responder / responder,12,6.432122451189946,0.0033333333333333335,3600
